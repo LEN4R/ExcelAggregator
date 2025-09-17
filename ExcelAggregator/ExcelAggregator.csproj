@@ -1,0 +1,40 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  
+	<PropertyGroup>
+	<LangVersion>10.0</LangVersion>
+	</PropertyGroup>
+  
+   <PropertyGroup>
+	<!-- Иконка -->
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+
+    <!-- Метаданные -->
+    <AssemblyTitle>ExcelAggregator</AssemblyTitle>
+    <Product>ExcelAggregator</Product>
+    <Company>LEN4R</Company>
+    <Authors>Galiev Lenar</Authors>
+    <Description>Утилита </Description>
+    <Version>1.0.0.0</Version>
+  </PropertyGroup>
+  
+  <ItemGroup>
+  <Content Include="control.xlsx">
+    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+  </Content>
+</ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
+    <PackageReference Include="ExcelDataReader" Version="3.7.0" />
+    <PackageReference Include="ExcelDataReader.DataSet" Version="3.7.0" />
+  </ItemGroup>
+
+</Project>
