@@ -21,15 +21,15 @@
     <Company>LEN4R</Company>
     <Authors>Galiev Lenar</Authors>
     <Description>Программа автоматически собирает данные из множества Excel-файлов по шаблону control.xlsx и сохраняет их в одну результирующую книгу.</Description>
-    <Version>1.0.2.0</Version>
+    <Version>1.0.3</Version>
   </PropertyGroup>
   
-  <ItemGroup>
-  <Content Include="control.xlsx">
-    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    <CopyToPublishDirectory>Always</CopyToPublishDirectory>
-  </Content>
-</ItemGroup>
+
+<Target Name="RenameOutput" AfterTargets="Publish">
+  <Move
+   SourceFiles="$(PublishDir)$(AssemblyName).exe"
+    DestinationFiles="$(PublishDir)$(AssemblyName) v$(Version).exe" />
+</Target>
 
   <ItemGroup>
     <PackageReference Include="ClosedXML" Version="0.105.0" />
