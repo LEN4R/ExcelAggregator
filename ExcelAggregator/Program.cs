@@ -47,11 +47,12 @@ namespace ExcelAggregator
                 int totalRows = 0;
                 foreach (var ws in sheets)
                 {
+                    var lastRowUsed = ws.LastRowUsed();
+                    if (lastRowUsed == null) continue;
                     int lr = ws.LastRowUsed().RowNumber();
                     // -3: первые две строки конфигурации и одна строка условных обозначений
                     if (lr > 3) totalRows += (lr - 3);
                 }
-
                 int processed = 0;
                 int sheetIndex = 0;
 
@@ -79,16 +80,20 @@ namespace ExcelAggregator
                     // --- Основная обработка начинается с 4-й строки control.xlsx ---
                     for (int r = 4; r <= lastRow; r++)
                     {
-                        string folderPath = wsControl.Cell(r, 1).GetString().Trim();
-                        string fileName = wsControl.Cell(r, 2).GetString().Trim();
-                        string sheetName = wsControl.Cell(r, 3).GetString().Trim();
+                        string folderPath   = wsControl.Cell(r, 1).GetString().Trim();
+                        string fileName     = wsControl.Cell(r, 2).GetString().Trim();
+                        string sheetName    = wsControl.Cell(r, 3).GetString().Trim();
+                        
                         if (string.IsNullOrWhiteSpace(fileName) || string.IsNullOrWhiteSpace(sheetName))
                             continue;
+
+                        if (!IsValidFileName(fileName))
+                            continue; // пропустить строку
 
                         string targetFilePath = null;
 
                         // 1) путь из колонки A
-                        if (!string.IsNullOrWhiteSpace(folderPath))
+                        if (!string.IsNullOrWhiteSpace(folderPath) && IsValidPath(folderPath))
                         {
                             string path = Path.Combine(folderPath, fileName);
                             if (File.Exists(path)) targetFilePath = path;
@@ -178,7 +183,6 @@ namespace ExcelAggregator
                         {
                             // пропускаем ошибочный файл без сообщений
                         }
-
                         processed++;
                         ShowProgress(processed, totalRows);
                     }
@@ -203,8 +207,22 @@ namespace ExcelAggregator
             }
         }
 
-        // --- Вспомогательные методы -----------------------------------------
+        static bool IsValidPath(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            // недопустимые символы в имени файла/папки
+            char[] invalid = Path.GetInvalidPathChars();
+            return path.IndexOfAny(invalid) < 0;
+        }
 
+        static bool IsValidFileName(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            char[] invalid = Path.GetInvalidFileNameChars();
+            return name.IndexOfAny(invalid) < 0;
+        }
+
+        // Вспомогательные методы
         static void ShowProgress(int done, int total)
         {
             double percent = total == 0 ? 100 : (double)done / total * 100;
