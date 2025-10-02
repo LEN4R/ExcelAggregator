@@ -6,6 +6,7 @@ using System.Data;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace ExcelAggregator
@@ -31,13 +32,14 @@ namespace ExcelAggregator
                 // Папка, где лежит exe
                 string originalExePath = GetOriginalExePath();
                 string originalExeFolder = Path.GetDirectoryName(originalExePath)!;
-                string controlPath = Path.Combine(originalExeFolder, "control.xlsx");
 
-                // Проверяем наличие control.xlsx рядом с exe
-                if (!File.Exists(controlPath))
+                // --- Поиск control_*.xlsx ---
+                string? controlPath = Directory.GetFiles(originalExeFolder, "control_*.xlsx").FirstOrDefault();
+
+                if (controlPath == null)
                 {
-                    Console.WriteLine($"Файл control.xlsx не найден рядом с программой: {originalExeFolder}");
-                    Console.Write("Укажите папку, где находится control.xlsx или Enter для выхода: ");
+                    Console.WriteLine($"Файл control_*.xlsx не найден рядом с программой: {originalExeFolder}");
+                    Console.Write("Укажите папку, где находится control_*.xlsx или Enter для выхода: ");
                     string? userDir = Console.ReadLine();
 
                     if (string.IsNullOrWhiteSpace(userDir))
@@ -47,18 +49,16 @@ namespace ExcelAggregator
                         return;
                     }
 
-                    string altPath = Path.Combine(userDir.Trim('"'), "control.xlsx");
-                    if (!File.Exists(altPath))
+                    controlPath = Directory.GetFiles(userDir.Trim('"'), "control_*.xlsx").FirstOrDefault();
+                    if (controlPath == null)
                     {
-                        Console.WriteLine("В указанной папке файл control.xlsx не найден. Завершение работы.");
+                        Console.WriteLine("В указанной папке файл control_*.xlsx не найден. Завершение работы.");
                         Console.ReadLine();
                         return;
                     }
-
-                    controlPath = altPath;
                 }
 
-                Console.WriteLine($"Файл control.xlsx найден: {controlPath}\n");
+                Console.WriteLine($"Файл control найден: {controlPath}\n");
 
                 // Итоговая книга
                 var resultWorkbook = new XLWorkbook();
@@ -73,7 +73,7 @@ namespace ExcelAggregator
                     var lastRowUsed = ws.LastRowUsed();
                     if (lastRowUsed == null) continue;
                     int lr = lastRowUsed.RowNumber();
-                    if (lr > 3) totalRows += (lr - 3); // -3: первые две строки конфигурации и строка условных обозначений
+                    if (lr > 3) totalRows += (lr - 3);
                 }
 
                 int processed = 0;
@@ -92,10 +92,23 @@ namespace ExcelAggregator
                     int lastRow = wsControl.LastRowUsed().RowNumber();
                     int lastCol = wsControl.LastColumnUsed().ColumnNumber();
 
-                    // Копируем структуру начиная с 3-й строки
+                    // --- Копируем структуру начиная с 3-й строки ---
                     for (int r = 3; r <= lastRow; r++)
+                    {
                         for (int c = 1; c <= lastCol; c++)
-                            resultSheet.Cell(r - 2, c).Value = wsControl.Cell(r, c).Value;
+                        {
+                            var srcCell = wsControl.Cell(r, c);
+                            var dstCell = resultSheet.Cell(r - 2, c);
+
+                            if (srcCell.HasFormula)
+                                dstCell.FormulaA1 = srcCell.FormulaA1; // копируем формулу
+                            else
+                                dstCell.Value = srcCell.Value; // копируем значение
+                        }
+                    }
+
+                    // Закрепляем первые 3 строки
+                    resultSheet.SheetView.FreezeRows(3);
 
                     // --- Основная обработка с 4-й строки ---
                     for (int r = 4; r <= lastRow; r++)
@@ -152,6 +165,9 @@ namespace ExcelAggregator
                                 object? rawObj = GetCellValueWithFallback(table, cellAddr, targetFilePath, sheetName);
                                 var resultCell = resultSheet.Cell(r - 2, c);
 
+                                // Не затираем формулы из control-файла
+                                if (resultCell.HasFormula) continue;
+
                                 if (rawObj == null) continue;
 
                                 if (rawObj is IConvertible conv && (rawObj.GetType().IsPrimitive || rawObj is decimal))
@@ -194,6 +210,9 @@ namespace ExcelAggregator
                         processed++;
                         ShowProgress(processed, totalRows);
                     }
+
+                    // Авторасширение столбцов
+                    resultSheet.Columns().AdjustToContents();
                 }
 
                 Console.WriteLine(); // новая строка после прогресс-бара
@@ -218,57 +237,35 @@ namespace ExcelAggregator
             Console.ReadLine();
         }
 
-
         // НОВЫЙ МЕТОД: Получение пути к оригинальному EXE файлу
         static string GetOriginalExePath()
         {
-            // Способ 1: Через Process.MainModule (самый надежный для single-file)
             try
             {
-                string processPath = Process.GetCurrentProcess().MainModule.FileName;
-
-                // Проверяем, не временный ли это путь
-                if (!processPath.Contains(@"\Temp\") && !processPath.Contains(@"\temp\"))
-                {
+                string processPath = Process.GetCurrentProcess().MainModule!.FileName!;
+                if (!processPath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase))
                     return processPath;
-                }
             }
-            catch
-            {
-                // Если не получилось, пробуем другие способы
-            }
+            catch { }
 
-            // Способ 2: Через AppContext.BaseDirectory (может вернуть временную папку)
             string baseDir = AppContext.BaseDirectory;
-            if (!baseDir.Contains(@"\Temp\") && !baseDir.Contains(@"\temp\"))
+            if (!baseDir.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase))
             {
-                // Ищем EXE файл в этой папке
                 var exeFiles = Directory.GetFiles(baseDir, "*.exe");
-                if (exeFiles.Length > 0)
-                {
-                    return exeFiles[0]; // возвращаем первый найденный EXE
-                }
+                if (exeFiles.Length > 0) return exeFiles[0];
                 return Path.Combine(baseDir, Process.GetCurrentProcess().ProcessName + ".exe");
             }
-            
-            // Способ 3: Через Assembly.Location (последний вариант)
+
             try
             {
                 string assemblyPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
-                if (!string.IsNullOrEmpty(assemblyPath) && !assemblyPath.Contains(@"\Temp\"))
-                {
+                if (!string.IsNullOrEmpty(assemblyPath) && !assemblyPath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase))
                     return assemblyPath;
-                }
             }
-            catch
-            {
-                // Если все способы не сработали
-            }
+            catch { }
 
-            // Если ничего не помогло, возвращаем то, что есть
-            return Process.GetCurrentProcess().MainModule.FileName;
+            return Process.GetCurrentProcess().MainModule!.FileName!;
         }
-
 
         static bool IsValidPath(string? path) => !string.IsNullOrWhiteSpace(path) && path.IndexOfAny(Path.GetInvalidPathChars()) < 0;
         static bool IsValidFileName(string? name) => !string.IsNullOrWhiteSpace(name) && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
