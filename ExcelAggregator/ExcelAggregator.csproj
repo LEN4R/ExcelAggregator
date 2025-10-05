@@ -21,7 +21,7 @@
     <Company>LEN4R</Company>
     <Authors>Galiev Lenar</Authors>
     <Description>Программа автоматически собирает данные из множества Excel-файлов по шаблону control.xlsx и сохраняет их в одну результирующую книгу.</Description>
-    <Version>1.0.3</Version>
+    <Version>1.0.5</Version>
   </PropertyGroup>
   
 

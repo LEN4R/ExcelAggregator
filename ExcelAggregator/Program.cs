@@ -13,7 +13,6 @@ namespace ExcelAggregator
 {
     class Program
     {
-        // Кэш открытых книг
         private static readonly Dictionary<string, XLWorkbook> _workbookCache = new();
 
         static void Main()
@@ -29,7 +28,6 @@ namespace ExcelAggregator
 
             try
             {
-                // Папка, где лежит exe
                 string originalExePath = GetOriginalExePath();
                 string originalExeFolder = Path.GetDirectoryName(originalExePath)!;
 
@@ -38,8 +36,8 @@ namespace ExcelAggregator
 
                 if (controlPath == null)
                 {
-                    Console.WriteLine($"Файл control_*.xlsx не найден рядом с программой: {originalExeFolder}");
-                    Console.Write("Укажите папку, где находится control_*.xlsx или Enter для выхода: ");
+                    Console.WriteLine($"Файл настройки не найден рядом с программой!");
+                    Console.Write("Укажите папку, где находится настройки или Enter для выхода: ");
                     string? userDir = Console.ReadLine();
 
                     if (string.IsNullOrWhiteSpace(userDir))
@@ -60,82 +58,82 @@ namespace ExcelAggregator
 
                 Console.WriteLine($"Файл control найден: {controlPath}\n");
 
-                // Итоговая книга
                 var resultWorkbook = new XLWorkbook();
-
                 using var controlWorkbook = new XLWorkbook(controlPath);
 
-                // --- Сбор всех листов ---
-                var sheets = controlWorkbook.Worksheets;
                 int totalRows = 0;
-                foreach (var ws in sheets)
+                foreach (var ws in controlWorkbook.Worksheets)
                 {
                     var lastRowUsed = ws.LastRowUsed();
                     if (lastRowUsed == null) continue;
                     int lr = lastRowUsed.RowNumber();
-                    if (lr > 3) totalRows += (lr - 3);
+                    if (lr > 6) totalRows += (lr - 6);
                 }
 
                 int processed = 0;
 
-                foreach (var wsControl in sheets)
+                foreach (var wsControl in controlWorkbook.Worksheets)
                 {
-                    // Чтение настроек листа
-                    string sheetDefaultFolder = wsControl.Cell("B1").GetString().Trim();
-                    int decimals = 6;
-                    if (int.TryParse(wsControl.Cell("B2").GetString().Trim(), out int d) && d >= 0)
-                        decimals = d;
+                    string defaultFolder = wsControl.Cell("B1").GetString().Trim();
+                    int decimals = int.TryParse(wsControl.Cell("B2").GetString().Trim(), out int d) ? d : 6;
+                    string autoFit = wsControl.Cell("B3").GetString().Trim().ToLower();
+                    bool doAutoFit = autoFit == "да" || autoFit == "yes" || autoFit == "true";
 
-                    // Создаём лист в результате с таким же именем
                     var resultSheet = resultWorkbook.AddWorksheet(wsControl.Name);
-
                     int lastRow = wsControl.LastRowUsed().RowNumber();
                     int lastCol = wsControl.LastColumnUsed().ColumnNumber();
 
-                    // --- Копируем структуру начиная с 3-й строки ---
-                    for (int r = 3; r <= lastRow; r++)
+                    // --- Копирование структуры начиная с 6-й строки ---
+                    for (int r = 6; r <= lastRow; r++)
                     {
                         for (int c = 1; c <= lastCol; c++)
                         {
-                            var srcCell = wsControl.Cell(r, c);
-                            var dstCell = resultSheet.Cell(r - 2, c);
+                            var src = wsControl.Cell(r, c);
+                            var dst = resultSheet.Cell(r - 5, c);
 
-                            if (srcCell.HasFormula)
-                                dstCell.FormulaA1 = srcCell.FormulaA1; // копируем формулу
+                            string fileName = wsControl.Cell(r, 2).GetString().Trim();
+                            if (string.IsNullOrEmpty(fileName))
+                            {
+                                // если строка вспомогательная → сохраняем формулы
+                                if (src.HasFormula)
+                                    dst.FormulaA1 = src.FormulaA1;
+                                else
+                                    dst.Value = src.Value;
+                            }
                             else
-                                dstCell.Value = srcCell.Value; // копируем значение
+                            {
+                                // строки с файлами → только значения
+                                dst.Value = src.Value;
+                            }
                         }
                     }
 
-                    // Закрепляем первые 3 строки
-                    resultSheet.SheetView.FreezeRows(3);
+                    // --- Закрепляем только первую строку ---
+                    resultSheet.SheetView.FreezeRows(1);
 
-                    // --- Основная обработка с 4-й строки ---
-                    for (int r = 4; r <= lastRow; r++)
+                    // --- Обработка строк с файлами ---
+                    for (int r = 7; r <= lastRow; r++)
                     {
-                        string folderPath = wsControl.Cell(r, 1).GetString().Trim();
+                        string folder = wsControl.Cell(r, 1).GetString().Trim();
                         string fileName = wsControl.Cell(r, 2).GetString().Trim();
                         string sheetName = wsControl.Cell(r, 3).GetString().Trim();
 
                         if (string.IsNullOrWhiteSpace(fileName) || string.IsNullOrWhiteSpace(sheetName)) continue;
                         if (!IsValidFileName(fileName)) continue;
 
-                        string? targetFilePath = null;
-
-                        // 1) путь из колонки A
-                        if (!string.IsNullOrWhiteSpace(folderPath) && IsValidPath(folderPath))
+                        string? path = null;
+                        if (!string.IsNullOrWhiteSpace(folder) && IsValidPath(folder))
                         {
-                            string path = Path.Combine(folderPath, fileName);
-                            if (File.Exists(path)) targetFilePath = path;
+                            string full = Path.Combine(folder, fileName);
+                            if (File.Exists(full)) path = full;
                         }
-                        // 2) поиск в папке по умолчанию B1 (рекурсивно)
-                        else if (!string.IsNullOrWhiteSpace(sheetDefaultFolder))
+                        else if (!string.IsNullOrWhiteSpace(defaultFolder))
                         {
-                            var files = Directory.GetFiles(sheetDefaultFolder, fileName, SearchOption.AllDirectories);
-                            if (files.Length > 0) targetFilePath = files[0];
+                            var found = Directory.GetFiles(defaultFolder, fileName, SearchOption.AllDirectories);
+                            if (found.Length > 0) path = found[0];
                         }
 
-                        if (targetFilePath == null)
+                        if (path == null)
                         {
                             processed++;
                             ShowProgress(processed, totalRows);
@@ -144,7 +142,7 @@ namespace ExcelAggregator
 
                         try
                         {
-                            var ds = ReadExcelFile(targetFilePath);
+                            var ds = ReadExcelFile(path);
                             if (!ds.Tables.Contains(sheetName))
                             {
                                 processed++;
@@ -154,79 +152,76 @@ namespace ExcelAggregator
 
                             var table = ds.Tables[sheetName];
 
-                            if (string.IsNullOrWhiteSpace(folderPath))
-                                resultSheet.Cell(r - 2, 1).Value = targetFilePath;
+                            if (string.IsNullOrWhiteSpace(folder))
+                                resultSheet.Cell(r - 5, 1).Value = path;
 
                             for (int c = 4; c <= lastCol; c++)
                             {
                                 string cellAddr = wsControl.Cell(r, c).GetString().Trim();
                                 if (string.IsNullOrWhiteSpace(cellAddr)) continue;
 
-                                object? rawObj = GetCellValueWithFallback(table, cellAddr, targetFilePath, sheetName);
-                                var resultCell = resultSheet.Cell(r - 2, c);
+                                object? val = GetCellValueWithFallback(table, cellAddr, path, sheetName);
+                                var dest = resultSheet.Cell(r - 5, c);
 
-                                // Не затираем формулы из control-файла
-                                if (resultCell.HasFormula) continue;
+                                if (dest.HasFormula) continue;
+                                if (val == null) continue;
 
-                                if (rawObj == null) continue;
-
-                                if (rawObj is IConvertible conv && (rawObj.GetType().IsPrimitive || rawObj is decimal))
+                                if (val is IConvertible conv && (val.GetType().IsPrimitive || val is decimal))
                                 {
                                     double num = conv.ToDouble(CultureInfo.InvariantCulture);
-                                    resultCell.Value = num;
-                                    resultCell.Style.NumberFormat.Format = decimals > 0 ? "0." + new string('#', decimals) : "0";
+                                    dest.Value = num;
+                                    dest.Style.NumberFormat.Format = decimals > 0 ? "0." + new string('#', decimals) : "0";
                                 }
-                                else if (rawObj is DateTime dt)
+                                else if (val is DateTime dt)
                                 {
-                                    resultCell.Value = dt;
-                                    resultCell.Style.DateFormat.Format = "yyyy-MM-dd HH:mm";
+                                    dest.Value = dt;
+                                    dest.Style.DateFormat.Format = "yyyy-MM-dd HH:mm";
                                 }
                                 else
                                 {
-                                    string s = rawObj.ToString()!;
-                                    if (double.TryParse(s, NumberStyles.Any, CultureInfo.CurrentCulture, out double n) ||
-                                        double.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out n))
+                                    string s = val.ToString()!;
+                                    if (double.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out double n))
                                     {
-                                        resultCell.Value = n;
-                                        resultCell.Style.NumberFormat.Format = decimals > 0 ? "0." + new string('#', decimals) : "0";
+                                        dest.Value = n;
+                                        dest.Style.NumberFormat.Format = decimals > 0 ? "0." + new string('#', decimals) : "0";
                                     }
-                                    else if (DateTime.TryParse(s, CultureInfo.CurrentCulture, DateTimeStyles.None, out DateTime d1) ||
-                                             DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out d1))
+                                    else if (DateTime.TryParse(s, out DateTime dd))
                                     {
-                                        resultCell.Value = d1;
-                                        resultCell.Style.DateFormat.Format = "yyyy-MM-dd HH:mm";
+                                        dest.Value = dd;
+                                        dest.Style.DateFormat.Format = "yyyy-MM-dd HH:mm";
                                     }
                                     else
                                     {
-                                        resultCell.Value = s;
+                                        dest.Value = s;
                                     }
                                 }
                             }
                         }
-                        catch
-                        {
-                            // пропускаем ошибочный файл
-                        }
+                        catch { }
+
                         processed++;
                         ShowProgress(processed, totalRows);
                     }
 
-                    // Авторасширение столбцов
-                    resultSheet.Columns().AdjustToContents();
+                    if (doAutoFit)
+                    {
+                        resultSheet.Columns().AdjustToContents();
+                        resultSheet.Rows().AdjustToContents();
+                    }
                 }
 
-                Console.WriteLine(); // новая строка после прогресс-бара
+                Console.WriteLine();
 
                 string timestamp = DateTime.Now.ToString("yyyy.MM.dd_HH-mm");
                 string resultPath = Path.Combine(originalExeFolder, $"{timestamp} EA result.xlsx");
                 resultWorkbook.SaveAs(resultPath);
 
-                Console.WriteLine($"\nПроцесс успешно выполнен.\nРезультат сохранён в:\n{resultPath}");
-                Console.WriteLine("\n(с) Галиев Ленар\nИсходный код: https://github.com/LEN4R/ExcelAggregator/");
+                Console.WriteLine($"\nПроцесс завершён.\nФайл сохранён: {resultPath}");
+                Console.WriteLine("\n(с) Галиев Ленар");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"\nПроцесс завершился с ошибкой: {ex.Message}");
+                Console.WriteLine($"\nОшибка: {ex.Message}");
             }
             finally
             {
@@ -237,34 +232,19 @@ namespace ExcelAggregator
             Console.ReadLine();
         }
 
-        // НОВЫЙ МЕТОД: Получение пути к оригинальному EXE файлу
         static string GetOriginalExePath()
         {
             try
             {
-                string processPath = Process.GetCurrentProcess().MainModule!.FileName!;
-                if (!processPath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase))
-                    return processPath;
+                string p = Process.GetCurrentProcess().MainModule!.FileName!;
+                if (!p.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase))
+                    return p;
             }
             catch { }
 
             string baseDir = AppContext.BaseDirectory;
-            if (!baseDir.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase))
-            {
-                var exeFiles = Directory.GetFiles(baseDir, "*.exe");
-                if (exeFiles.Length > 0) return exeFiles[0];
-                return Path.Combine(baseDir, Process.GetCurrentProcess().ProcessName + ".exe");
-            }
-
-            try
-            {
-                string assemblyPath = System.Reflection.Assembly.GetExecutingAssembly().Location;
-                if (!string.IsNullOrEmpty(assemblyPath) && !assemblyPath.Contains(@"\Temp\", StringComparison.OrdinalIgnoreCase))
-                    return assemblyPath;
-            }
-            catch { }
-
-            return Process.GetCurrentProcess().MainModule!.FileName!;
+            var exe = Directory.GetFiles(baseDir, "*.exe").FirstOrDefault();
+            return exe ?? Path.Combine(baseDir, Process.GetCurrentProcess().ProcessName + ".exe");
         }
 
         static bool IsValidPath(string? path) => !string.IsNullOrWhiteSpace(path) && path.IndexOfAny(Path.GetInvalidPathChars()) < 0;
@@ -289,23 +269,21 @@ namespace ExcelAggregator
         static DataSet ReadExcelFile(string path)
         {
             using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            IExcelDataReader reader;
-            string ext = Path.GetExtension(path).ToLowerInvariant();
-            reader = (ext == ".xls" || ext == ".xlsb") ? ExcelReaderFactory.CreateBinaryReader(stream) : ExcelReaderFactory.CreateReader(stream);
+            IExcelDataReader reader = Path.GetExtension(path).ToLowerInvariant() switch
+            {
+                ".xls" or ".xlsb" => ExcelReaderFactory.CreateBinaryReader(stream),
+                _ => ExcelReaderFactory.CreateReader(stream)
+            };
             var conf = new ExcelDataSetConfiguration { ConfigureDataTable = _ => new ExcelDataTableConfiguration { UseHeaderRow = false } };
             using (reader) return reader.AsDataSet(conf);
         }
 
-        static object? GetCellValueWithFallback(DataTable table, string cellAddr, string file, string sheet)
+        static object? GetCellValueWithFallback(DataTable table, string addr, string file, string sheet)
         {
             try
             {
-                string letters = "", numbers = "";
-                foreach (char ch in cellAddr)
-                {
-                    if (char.IsLetter(ch)) letters += ch;
-                    else if (char.IsDigit(ch)) numbers += ch;
-                }
+                string letters = new(addr.Where(char.IsLetter).ToArray());
+                string numbers = new(addr.Where(char.IsDigit).ToArray());
                 if (!int.TryParse(numbers, out int row) || string.IsNullOrEmpty(letters)) return null;
 
                 int col = ColumnLetterToNumber(letters);
@@ -314,23 +292,14 @@ namespace ExcelAggregator
                 object val = table.Rows[row - 1][col];
                 if (val is string s && s.TrimStart().StartsWith("="))
                 {
-                    string ext = Path.GetExtension(file).ToLowerInvariant();
-                    if (ext == ".xlsx" || ext == ".xlsm")
+                    if (!_workbookCache.TryGetValue(file, out var wb))
                     {
-                        if (!_workbookCache.TryGetValue(file, out var wb))
-                        {
-                            wb = new XLWorkbook(file);
-                            _workbookCache[file] = wb;
-                        }
-                        var ws = wb.Worksheet(sheet);
-                        var cell = ws.Cell(cellAddr);
-                        if (!cell.IsEmpty())
-                        {
-                            object cv = cell.GetValue<object>();
-                            string cvStr = cv?.ToString() ?? string.Empty;
-                            if (!cvStr.TrimStart().StartsWith("=")) return cv;
-                        }
+                        wb = new XLWorkbook(file);
+                        _workbookCache[file] = wb;
                     }
+                    var ws = wb.Worksheet(sheet);
+                    var cell = ws.Cell(addr);
+                    if (!cell.IsEmpty()) return cell.Value;
                 }
                 return val;
             }
@@ -340,7 +309,8 @@ namespace ExcelAggregator
         static int ColumnLetterToNumber(string letters)
         {
             int sum = 0;
-            foreach (char c in letters.ToUpperInvariant()) sum = sum * 26 + (c - 'A' + 1);
+            foreach (char c in letters.ToUpperInvariant())
+                sum = sum * 26 + (c - 'A' + 1);
             return sum - 1;
         }
     }
