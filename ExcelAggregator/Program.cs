@@ -36,8 +36,8 @@ namespace ExcelAggregator
 
                 if (controlPath == null)
                 {
-                    Console.WriteLine($"Файл настройки не найден рядом с программой!");
-                    Console.Write("Укажите папку, где находится настройки или Enter для выхода: ");
+                    Console.WriteLine($"Файл control не найден!");
+                    Console.Write("Укажите папку, где находится control или Enter для выхода: ");
                     string? userDir = Console.ReadLine();
 
                     if (string.IsNullOrWhiteSpace(userDir))
@@ -90,6 +90,9 @@ namespace ExcelAggregator
                         {
                             var src = wsControl.Cell(r, c);
                             var dst = resultSheet.Cell(r - 5, c);
+
+                            // ✅ Копируем стиль оформления
+                            dst.Style = src.Style;
 
                             string fileName = wsControl.Cell(r, 2).GetString().Trim();
                             if (string.IsNullOrEmpty(fileName))
